@@ -6,9 +6,9 @@ import cv2
 width = 640
 height = 480
 
-center = width / 2
+offset = 8
 
-offset = 10
+center = width / 2 + offset
 
 # HSV threshold
 lower_color = (0, 180, 200)
@@ -27,7 +27,11 @@ while True:
     frame_aux = cv2.cvtColor(frame[243:260, :, :], cv2.COLOR_BGR2HSV)
     frame_aux = cv2.inRange(frame_aux, lower_color, upper_color)
 
-    M = cv2.moments(frame_aux)
+    contours, _ = cv2.findContours(frame_aux, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    max_cnt = max(contours, key=cv2.contourArea)
+
+    M = cv2.moments(max_cnt)
 
     try:
         centroid_x = int(M["m10"] / M["m00"])
@@ -46,8 +50,10 @@ while True:
 
     # frame = cv2.line(frame, (0, 243), (width, 243), (255, 255 , 255), 1)
     # frame = cv2.line(frame, (0, 260), (width, 260), (255, 255 , 255), 1)
+    max_cnt[:, :, 1] += 240
+    frame = cv2.drawContours(frame, [max_cnt], -1, (0, 255, 0), 2)
 
-    cv2.circle(frame, (centroid_x, 250), 3, (0, 0, 0), -1)
-    frame = cv2.line(frame, (int(width / 2), 0), (int(width / 2), height), (255, 255, 255), 1)
+    # cv2.circle(frame, (centroid_x, 250), 3, (0, 0, 0), -1)
+    # frame = cv2.line(frame, (int(width / 2), 0), (int(width / 2), height), (255, 255, 255), 1)
 
     GUI.showImage(frame)
