@@ -40,6 +40,7 @@ class PIDController:
 class CalculateError:
     def __init__(self, width: int = 640, height: int = 480, offset: int = 10,
                  lower_color=(0, 180, 200), upper_color=(0, 255, 255)):
+
         # Initialize the width and height of the frame
         self._width = width
         self._height = height
@@ -78,27 +79,26 @@ class CalculateError:
         return self._center - self._centroid_x
 
 
+base_v = 6.5
+
 prep = CalculateError(width=640, height=480, offset=8, lower_color=(0, 180, 200), upper_color=(0, 255, 255))
 
-controller_w = PIDController(0.001 * 9, 0.00001, 0.001 * 7)
-controller_v = PIDController(0.001 * 10, 0, 0)
+controller_w = PIDController(0.001 * 12, 0.00001, 0.001 * 8)
+controller_v = PIDController(0.001 * 3, 0, 0.001 * 10)
 
 while True:
-
     # Get the image
     frame = HAL.getImage()
 
     # Calculate the error
     error = prep.run(frame[243:260, :, :])
-    print(f"Error: {error}")
 
     w = controller_w.control(error)
-    print(f"Velocity w: {w}")
 
-    if abs(error) > 15:
-        v = 4
-    else:
-        v = 4
+    v = controller_v.control(error)
+    v = base_v - abs(v)
+
+    print(f"Velocity v: {v}")
 
     # Set the linear speed
     HAL.setV(v)
