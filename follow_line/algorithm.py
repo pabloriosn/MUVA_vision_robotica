@@ -3,6 +3,27 @@ from HAL import HAL
 
 import cv2
 
+
+class PIDController:
+    def __init__(self, kp, ki, kd) -> None:
+        self._kp = kp
+        self._ki = ki
+        self._kd = kd
+        self._previous_error = 0
+        self._integral = 0
+
+    def control(self, error) -> float:
+        p = self._kp * error
+
+        self._integral += error
+        i = self._ki * self._integral
+
+        d = self._kd * (error - self._previous_error)
+        self._previous_error = error
+
+        return p + i + d
+
+
 width = 640
 height = 480
 
@@ -14,11 +35,8 @@ center = width / 2 + offset
 lower_color = (0, 180, 200)
 upper_color = (0, 255, 255)
 
-kp = 0.001 * 9
-kd = 0.001 * 7
-
-last_error = 0
-w = 0
+controller_w = PIDController(0.001 * 9, 0.00001, 0.001 * 7)
+controller_v = PIDController(0.001 * 10, 0, 0)
 
 while True:
 
@@ -39,21 +57,17 @@ while True:
         centroid_x = center
 
     error = center - centroid_x
-
-    w = kp * error + kd * (error - last_error)
-
-    last_error = error
     print(f"Error: {error}")
 
-    HAL.setV(4)
+    w = controller_w.control(error)
+    print(f"Velocity w: {w}")
+
+    if abs(error) > 15:
+        v = 4
+    else:
+        v = 8
+
+    HAL.setV(v)
     HAL.setW(w)
-
-    # frame = cv2.line(frame, (0, 243), (width, 243), (255, 255 , 255), 1)
-    # frame = cv2.line(frame, (0, 260), (width, 260), (255, 255 , 255), 1)
-    max_cnt[:, :, 1] += 240
-    frame = cv2.drawContours(frame, [max_cnt], -1, (0, 255, 0), 2)
-
-    # cv2.circle(frame, (centroid_x, 250), 3, (0, 0, 0), -1)
-    # frame = cv2.line(frame, (int(width / 2), 0), (int(width / 2), height), (255, 255, 255), 1)
 
     GUI.showImage(frame)
