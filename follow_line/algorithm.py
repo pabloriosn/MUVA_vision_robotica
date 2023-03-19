@@ -2,6 +2,7 @@ from GUI import GUI
 from HAL import HAL
 
 import cv2
+import math
 
 
 class PIDController:
@@ -18,11 +19,6 @@ class PIDController:
         self._integral = 0
 
     def control(self, error: float) -> float:
-        """
-
-        :param error:
-        :return:
-        """
         # Calculate the proportional term
         p = self._kp * error
 
@@ -38,8 +34,11 @@ class PIDController:
 
 
 class CalculateError:
-    def __init__(self, width: int = 640, height: int = 480, offset: int = 10,
-                 lower_color=(0, 180, 200), upper_color=(0, 255, 255)):
+    def __init__(self, width: int = 640,
+                 height: int = 480,
+                 offset: int = 10,
+                 lower_color=(0, 180, 200),
+                 upper_color=(0, 255, 255)):
 
         # Initialize the width and height of the frame
         self._width = width
@@ -58,14 +57,48 @@ class CalculateError:
         # Set the centroid's x-coordinate to the center of the frame
         self._centroid_x = self._center
 
-    def run(self, roi) -> float:
+        self._error = 0
+
+    def _preprocess(self, roi):
 
         # Convert the region of interest (ROI) to HSV color space and filter with the HSV threshold
-        roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        roi = cv2.inRange(roi, self._lower_color, self._upper_color)
+        mask = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(mask, self._lower_color, self._upper_color)
+
+        return mask
+
+    def _relocalization(self, mask):
+        sign = math.copysign(1, self._error)
+
+        while cv2.countNonZero(mask) < 40:
+            print(f"Looking for the red line {sign}")
+
+            # Set the linear speed
+            HAL.setV(0)
+            # Set the angular velocity
+            HAL.setW(sign * 0.5)
+
+            frame = HAL.getImage()
+
+            mask = self._preprocess(frame[243:260, :, :])
+
+            # To view a debug image
+            GUI.showImage(frame)
+
+        print("Find red line")
+
+        return mask
+
+    def run(self, roi) -> float:
+
+        mask = self._preprocess(roi)
+
+        # Check if robot see the red line
+        if cv2.countNonZero(mask) < 40:
+            mask = self._relocalization(mask)
 
         # FInd the contours and select the largest one
-        contours, _ = cv2.findContours(roi, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         max_cnt = max(contours, key=cv2.contourArea)
 
         # Calculate the centroid of the largest contour
@@ -76,7 +109,8 @@ class CalculateError:
             pass
 
         # Calculate the error between the center of the frame and the centroid calculated
-        return self._center - self._centroid_x
+        self._error = self._center - self._centroid_x
+        return self._error
 
 
 base_v = 6.5
