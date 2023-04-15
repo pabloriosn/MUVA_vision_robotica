@@ -15,7 +15,7 @@ class Reconstruction:
 
         # Get camera position
         self.point_3d_camleft = np.append(HAL.getCameraPosition('left'), 1)
-        # self.point_3d_camright = np.append(HAL.getCameraPosition('right'), 1)
+        self.point_3d_camright = np.append(HAL.getCameraPosition('right'), 1)
 
         self.verbose = verbose
 
@@ -27,49 +27,21 @@ class Reconstruction:
 
         for y, x in points_left:
 
-            im1 = self.image_left.copy()
-            im2 = self.image_right.copy()
-
-            # if self.verbose:
-            #     cv2.circle(self.image_left, (x, y), 10, (255, 0, 0), 10)
-
             # Get 3D point
-            point_3d_left = self._get_3d_point('left', x, y)
+            point_3d_left = self._get_3d_point(camera='left', x=x, y=y)
+            point_3d_cam = self.point_3d_camleft
 
-            dir = (point_3d_left - self.point_3d_camleft)
+            # Get direction of the 3D line
+            dir_3d_line = (point_3d_left - point_3d_cam)
 
-            point1_2d_right = self._get_2d_point('right', dir * 5)
-            point2_2d_right = self._get_2d_point('right', dir + self.point_3d_camleft)
+            # Get epilolar mask
+            mask = self._get_epipolar_mask(camera='right', direction_3d=dir_3d_line,
+                                           point3d_camera=point_3d_cam, thickness=10)
 
-            if self.verbose:
-                print(f"Point 1 image right : {point1_2d_right}; Point 2 image right: {point2_2d_right}")
-
-            def line(p1, p2):
-                m = (p2[1] - p1[1]) / (p2[0] - p1[0]) + 0.0000001
-                b = p1[1] - m * p1[0]
-
-                y_inicio = m * 0 + b
-                y_final = m * self.w + b
-                x_inicio = (0 - b) / m
-                x_final = (self.h - b) / m
-                print(y_inicio, y_final, x_final, x_inicio)
-
-                # Encontrar los puntos de inicio y finales
-                punto_inicio = (0, int(y_inicio))
-                punto_final = (int(x_final), self.h) if x_final <= self.w else (self.w, int(y_final))
-
-                return punto_inicio, punto_final
-
-            punto_inicio, punto_final = line(point1_2d_right, point2_2d_right)
-
+            im1 = self.image_left.copy()
             cv2.circle(im1, (x, y), 2, (0, 255, 0), -1)
-            cv2.line(im2, punto_inicio, punto_final, (0, 255, 0), 1)
 
-            GUI.showImages(im1, im2, True)
-            time.sleep(5)
-
-            # if self.verbose:
-            #     print(f"Point 1 image right : {point1_2d_right}; Point 2 image right: {point2_2d_right}")
+            GUI.showImages(im1, mask, True)
 
         return self.image_left, cv2.Canny(cv2.cvtColor(self.image_left, cv2.COLOR_BGR2GRAY), 100, 200)
 
@@ -105,12 +77,42 @@ class Reconstruction:
         :param point_3d: 3D point
         :return: 2D point
         """
-        # Backprojects a 3D Point Space into the 2D Image Point
+        # Back project a 3D Point Space into the 2D Image Point
         point_2d = HAL.project(camera, point_3d)
         # Transform the Camera System to the Image Coordinate System
         point_2d = HAL.opticalToGrafic(camera, point_2d)
 
         return point_2d
+
+    def _get_epipolar_mask(self, camera: str, direction_3d: np.ndarray, point3d_camera: np.ndarray, thickness: int = 8) -> np.ndarray:
+        """
+        Get epipolar mask
+        :param camera: camera (left or right)
+        :param direction_3d: direction of the 3D line
+        :param point3d_camera: 3D point from the camera
+        :param thickness: thickness of the epipolar line
+        :return: mask with the epipolar line
+        """
+
+        # Get 2D points projected(pixels) in the image (left or right) from the 3D line
+        point1_2d_right = self._get_2d_point(camera, direction_3d * 5)
+        point2_2d_right = self._get_2d_point(camera, direction_3d + point3d_camera)
+
+        point1_line, point2_line = self._get_point_line(point1_2d_right, point2_2d_right)
+
+        mask = np.zeros((self.h, self.w), dtype=np.uint8)
+        cv2.line(mask, point1_line, point2_line, 255, thickness)
+
+        return mask
+
+    def _get_point_line(self, p1: np.ndarray, p2: np.ndarray) -> (int, int):
+        m = (p2[1] - p1[1]) / (p2[0] - p1[0]) + 1e-6
+        b = p1[1] - m * p1[0]
+
+        y_final = m * self.w + b
+        x_final = (self.h - b) / m
+
+        return (0, int(m * 0 + b)), (int(x_final), self.h) if x_final <= self.w else (self.w, int(y_final))
 
 
 while True:
