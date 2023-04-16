@@ -20,13 +20,11 @@ class Reconstruction:
         self.verbose = verbose
 
     def algorithm(self):
-
         # Get points of interest
         points_left, points_right = self._get_points_interest()
         print(f"Number of points of interest {points_left.shape[0]}")
 
         for y, x in points_left:
-
             # Get 3D point
             point_3d_left = self._get_3d_point(camera='left', x=x, y=y)
             point_3d_cam = self.point_3d_camleft
@@ -38,10 +36,17 @@ class Reconstruction:
             mask = self._get_epipolar_mask(camera='right', direction_3d=dir_3d_line,
                                            point3d_camera=point_3d_cam, thickness=10)
 
-            im1 = self.image_left.copy()
-            cv2.circle(im1, (x, y), 2, (0, 255, 0), -1)
+            point_homologue = self._get_point_homologue(camera='right', mask=mask, point_2d=(x, y), window_size=10)
 
-            GUI.showImages(im1, mask, True)
+            im1 = self.image_left.copy()
+            im2 = self.image_right.copy()
+
+            cv2.circle(im1, (x, y), 2, (0, 255, 0), -1)
+            cv2.circle(im2, point_homologue, 2, (0, 255, 0), -1)
+
+            print(x, y, point_homologue)
+            GUI.showImages(im1, im2, True)
+            time.sleep(3)
 
         return self.image_left, cv2.Canny(cv2.cvtColor(self.image_left, cv2.COLOR_BGR2GRAY), 100, 200)
 
@@ -65,7 +70,7 @@ class Reconstruction:
         """
         # Transform the Image Coordinate System to the Camera System
         point_2d_left = HAL.graficToOptical(camera, [x, y, 1])
-        # Backproject a 3D Point Space into the 2D Image Point
+        # Back project a 3D Point Space into the 2D Image Point
         point_3d_left = HAL.backproject(camera, point_2d_left)
 
         return point_3d_left
@@ -113,6 +118,34 @@ class Reconstruction:
         x_final = (self.h - b) / m
 
         return (0, int(m * 0 + b)), (int(x_final), self.h) if x_final <= self.w else (self.w, int(y_final))
+
+    def _get_point_homologue(self, camera: str, mask: np.ndarray, point_2d, window_size: int) -> (int, int):
+        """
+        Get point homologue
+        :param camera:
+        :param mask:
+        :param point_2d:
+        :param window_size:
+        :return:
+        """
+        # TODO change image to HSV
+
+        # Generate the patch image
+        half_w = window_size // 2
+        x_min = max(0, point_2d[0] - half_w)
+        y_min = max(0, point_2d[1] - half_w)
+        x_max = min(self.w, point_2d[0] + half_w + 1)
+        y_max = min(self.h, point_2d[1] + half_w + 1)
+
+        template = self.image_left[y_min:y_max, x_min:x_max]
+
+        mask_img = cv2.bitwise_and(self.image_right, self.image_right, mask)
+
+        result = cv2.matchTemplate(mask_img, template, cv2.TM_CCOEFF_NORMED)
+
+        y_result, x_result = np.unravel_index(np.argmax(result), result.shape[:2])
+
+        return x_result + half_w, y_result + half_w
 
 
 while True:
