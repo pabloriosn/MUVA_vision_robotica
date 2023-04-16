@@ -26,8 +26,8 @@ class Reconstruction:
 
         # Get camera position
         self.pos_3d_cam = {
-            'right': np.append(HAL.getCameraPosition('left'), 1),
-            'left': np.append(HAL.getCameraPosition('right'), 1)
+            'right': np.append(HAL.getCameraPosition('right'), 1),
+            'left': np.append(HAL.getCameraPosition('left'), 1)
         }
 
     def algorithm(self):
@@ -36,38 +36,48 @@ class Reconstruction:
         print(f"Number of points of interest {points_interest.shape[0]}")
 
         for y, x in points_interest:
-            # Get 3D point
-            point_3d_left = self._get_3d_point(camera=self.camera_origin, x=x, y=y)
-            pos_3d_cam = self.pos_3d_cam[self.camera_origin]
+
+            # Get 3D points
+            point_3d = self._get_3d_point(camera=self.camera_origin, x=x, y=y)
 
             # Get direction of the 3D line
-            dir_3d_line = (point_3d_left - pos_3d_cam)
+            dir_3d_line = (point_3d - self.pos_3d_cam[self.camera_origin])
 
             # Get epilolar mask
             mask = self._get_epipolar_mask(camera=self.camera_target, direction_3d=dir_3d_line,
-                                           point3d_camera=pos_3d_cam, thickness=10)
+                                           point3d_camera=self.pos_3d_cam[self.camera_origin], thickness=10)
 
-            point_homologue = self._get_point_homologue(cam_o=self.camera_origin, cam_t=self.camera_target,
-                                                        mask=mask, point_2d=(x, y), window_size=10)
+            # Get homologue point
+            point_2d_homologue = self._get_point_homologue(cam_o=self.camera_origin, cam_t=self.camera_target,
+                                                           mask=mask, point_2d=(x, y), window_size=10)
 
             if self.verbose:
-                print(f"Punto 1: ({x},{y}) y su homologo {point_homologue}")
+                print(f"Punto 1: ({x},{y}) y su homologo {point_2d_homologue}")
 
-                im1 = self.images[self.camera_origin].copy()
-                im2 = self.images[self.camera_target].copy()
+            # Get 3d from homologue point
+            point_3d_homologue = self._get_3d_point(camera=self.camera_target,
+                                                    x=point_2d_homologue[0], y=point_2d_homologue[1])
+            # Get direction of the 3D line
+            dir_3d_line_homologue = (point_3d_homologue - self.pos_3d_cam[self.camera_target])
 
-                cv2.circle(im1, (x, y), 2, (0, 255, 0), -1)
-                cv2.circle(im2, point_homologue, 2, (0, 255, 0), -1)
+            # Triangulation to get 3D point
+            point_3d_result = self._get_triangulation(cam_o=self.camera_origin, cam_t=self.camera_target,
+                                                      dir_o=dir_3d_line, dir_t=dir_3d_line_homologue)
 
-                GUI.showImages(im1, im2, True)
-                time.sleep(1)
+            point_3d_color = self.images[self.camera_origin][y, x].astype(np.float32)
+            point_3d_result = HAL.project3DScene(point_3d_result)
 
-        return self.images['left'], cv2.Canny(cv2.cvtColor(self.images['left'], cv2.COLOR_BGR2GRAY), 100, 200)
+            point_3d_final = np.append(point_3d_result, point_3d_color)
+
+            if self.verbose:
+                print(f"Point 3D: {point_3d_final}")
+
+            GUI.ShowNewPoints([point_3d_final.tolist()])
 
     def _get_points_interest(self, camera: str) -> np.ndarray:
         """
         Get points of interest in the images applying the Canny algorithm
-        :return: numpy array of points of interest in the left and right image
+        :return: Array of points of interest in the left and right image
         """
         edges = cv2.Canny(cv2.cvtColor(self.images[camera], cv2.COLOR_BGR2GRAY), 100, 200)
 
@@ -82,11 +92,11 @@ class Reconstruction:
         :return: 3D point
         """
         # Transform the Image Coordinate System to the Camera System
-        point_2d_left = HAL.graficToOptical(camera, [x, y, 1])
+        point_2d = HAL.graficToOptical(camera, [x, y, 1])
         # Back project a 3D Point Space into the 2D Image Point
-        point_3d_left = HAL.backproject(camera, point_2d_left)
+        point_3d = HAL.backproject(camera, point_2d)
 
-        return point_3d_left
+        return point_3d
 
     def _get_2d_point(self, camera: str, point_3d: np.ndarray) -> np.ndarray:
         """
@@ -124,6 +134,12 @@ class Reconstruction:
         return mask
 
     def _get_point_line(self, p1: np.ndarray, p2: np.ndarray) -> (int, int):
+        """
+        Get the points of the line that cross the image
+        :param p1: Coordinates of the first point
+        :param p2: Coordinates of the second point
+        :return: Points of the line
+        """
         m = (p2[1] - p1[1]) / (p2[0] - p1[0]) + 1e-6
         b = p1[1] - m * p1[0]
 
@@ -133,6 +149,15 @@ class Reconstruction:
         return (0, int(m * 0 + b)), (int(x_final), self.h) if x_final <= self.w else (self.w, int(y_final))
 
     def _get_point_homologue(self, cam_o: str, cam_t: str, mask: np.ndarray, point_2d, window_size: int) -> (int, int):
+        """
+        Get the homologue point of the point_2d in the image cam_t
+        :param cam_o: Name of the camera origin
+        :param cam_t: Name of the camera target
+        :param mask: Mask of the epipolar line
+        :param point_2d: Coordinates of the point
+        :param window_size: Size of the window
+        :return: Coordinates of the homologue point calculated
+        """
 
         # Generate the patch image
         half_w = window_size // 2
@@ -151,14 +176,28 @@ class Reconstruction:
 
         return x_result + half_w, y_result + half_w
 
+    def _get_triangulation(self, cam_o: str, cam_t: str, dir_o, dir_t) -> np.ndarray:
+        """
+        Get the 3D point from the triangulation of the 2D points
+        :param cam_o: Name of the camera origin
+        :param cam_t: Name of the camera target
+        :param dir_o: Direction of the 3D line in the camera origin
+        :param dir_t: Direction of the 3D line in the camera target
+        :return: 3D point
+        """
+        n = np.cross(dir_o[:3], dir_t[:3])
+
+        # Formar la matriz A y el vector b
+        A = np.array([dir_o[:3], n, -dir_t[:3]]).T
+        b = self.pos_3d_cam[cam_t][:3] - self.pos_3d_cam[cam_o][:3]
+
+        x, r, _ = np.linalg.lstsq(A, b, rcond=None)[0]
+
+        return (x * dir_o[:3]) + ((r / 2) * n)
+
 
 while True:
     reconstruction = Reconstruction(camera_origin='left', camera_target='right',
                                     image_left=HAL.getImage('left'), image_right=HAL.getImage('right'), verbose=True)
 
-    out_left, out_right = reconstruction.algorithm()
-
-    GUI.showImages(out_left, out_right, True)
-
-    print("hola")
-    time.sleep(10)
+    reconstruction.algorithm()
