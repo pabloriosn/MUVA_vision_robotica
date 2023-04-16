@@ -3,7 +3,6 @@ from HAL import HAL
 
 import cv2
 import numpy as np
-import time
 
 
 class Reconstruction:
@@ -64,14 +63,17 @@ class Reconstruction:
             point_3d_result = self._get_triangulation(cam_o=self.camera_origin, cam_t=self.camera_target,
                                                       dir_o=dir_3d_line, dir_t=dir_3d_line_homologue)
 
-            point_3d_color = self.images[self.camera_origin][y, x].astype(np.float32)
+            # Get color of the point
+            point_3d_color = self.images[self.camera_origin][y, x][::-1].astype(np.float32)
             point_3d_result = HAL.project3DScene(point_3d_result)
 
+            # Add color to the 3D point
             point_3d_final = np.append(point_3d_result, point_3d_color)
 
             if self.verbose:
                 print(f"Point 3D: {point_3d_final}")
 
+            # Show 3D point
             GUI.ShowNewPoints([point_3d_final.tolist()])
 
     def _get_points_interest(self, camera: str) -> np.ndarray:
@@ -80,6 +82,8 @@ class Reconstruction:
         :return: Array of points of interest in the left and right image
         """
         edges = cv2.Canny(cv2.cvtColor(self.images[camera], cv2.COLOR_BGR2GRAY), 100, 200)
+
+        GUI.showImages(self.images[camera], edges, True)
 
         return np.argwhere(edges == 255)
 
@@ -121,7 +125,6 @@ class Reconstruction:
         :param thickness: thickness of the epipolar line
         :return: mask with the epipolar line
         """
-
         # Get 2D points projected(pixels) in the image (left or right) from the 3D line
         point1_2d_right = self._get_2d_point(camera, direction_3d * 5)
         point2_2d_right = self._get_2d_point(camera, direction_3d + point3d_camera)
@@ -158,7 +161,6 @@ class Reconstruction:
         :param window_size: Size of the window
         :return: Coordinates of the homologue point calculated
         """
-
         # Generate the patch image
         half_w = window_size // 2
         x_min = max(0, point_2d[0] - half_w)
@@ -187,7 +189,6 @@ class Reconstruction:
         """
         n = np.cross(dir_o[:3], dir_t[:3])
 
-        # Formar la matriz A y el vector b
         A = np.array([dir_o[:3], n, -dir_t[:3]]).T
         b = self.pos_3d_cam[cam_t][:3] - self.pos_3d_cam[cam_o][:3]
 
@@ -198,6 +199,12 @@ class Reconstruction:
 
 while True:
     reconstruction = Reconstruction(camera_origin='left', camera_target='right',
-                                    image_left=HAL.getImage('left'), image_right=HAL.getImage('right'), verbose=True)
+                                    image_left=HAL.getImage('left'), image_right=HAL.getImage('right'),
+                                    verbose=False)
 
     reconstruction.algorithm()
+
+    print("Finish the reconstruction")
+
+    while True:
+        pass
