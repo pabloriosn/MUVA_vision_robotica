@@ -7,58 +7,71 @@ import time
 
 
 class Reconstruction:
-    def __init__(self, image_left: np.ndarray, image_right: np.ndarray, verbose: bool = False):
-        self.image_left = image_left
-        self.image_right = image_right
+    def __init__(self, image_left: np.ndarray, image_right: np.ndarray,
+                 camera_origin: str, camera_target: str, verbose: bool = False):
 
-        self.h, self.w = self.image_left.shape[:2]
+        self.camera_origin = camera_origin
+        self.camera_target = camera_target
+
+        self.h, self.w = image_left.shape[:2]
+        self.verbose = verbose
+
+        self.images = {
+            'right': image_right,
+            'left': image_left}
+
+        self.images_hsv = {
+            'right': cv2.cvtColor(image_right, cv2.COLOR_BGR2HSV),
+            'left': cv2.cvtColor(image_left, cv2.COLOR_BGR2HSV)}
 
         # Get camera position
-        self.point_3d_camleft = np.append(HAL.getCameraPosition('left'), 1)
-        self.point_3d_camright = np.append(HAL.getCameraPosition('right'), 1)
-
-        self.verbose = verbose
+        self.pos_3d_cam = {
+            'right': np.append(HAL.getCameraPosition('left'), 1),
+            'left': np.append(HAL.getCameraPosition('right'), 1)
+        }
 
     def algorithm(self):
         # Get points of interest
-        points_left, points_right = self._get_points_interest()
-        print(f"Number of points of interest {points_left.shape[0]}")
+        points_interest = self._get_points_interest(self.camera_origin)
+        print(f"Number of points of interest {points_interest.shape[0]}")
 
-        for y, x in points_left:
+        for y, x in points_interest:
             # Get 3D point
-            point_3d_left = self._get_3d_point(camera='left', x=x, y=y)
-            point_3d_cam = self.point_3d_camleft
+            point_3d_left = self._get_3d_point(camera=self.camera_origin, x=x, y=y)
+            pos_3d_cam = self.pos_3d_cam[self.camera_origin]
 
             # Get direction of the 3D line
-            dir_3d_line = (point_3d_left - point_3d_cam)
+            dir_3d_line = (point_3d_left - pos_3d_cam)
 
             # Get epilolar mask
-            mask = self._get_epipolar_mask(camera='right', direction_3d=dir_3d_line,
-                                           point3d_camera=point_3d_cam, thickness=10)
+            mask = self._get_epipolar_mask(camera=self.camera_target, direction_3d=dir_3d_line,
+                                           point3d_camera=pos_3d_cam, thickness=10)
 
-            point_homologue = self._get_point_homologue(camera='right', mask=mask, point_2d=(x, y), window_size=10)
+            point_homologue = self._get_point_homologue(cam_o=self.camera_origin, cam_t=self.camera_target,
+                                                        mask=mask, point_2d=(x, y), window_size=10)
 
-            im1 = self.image_left.copy()
-            im2 = self.image_right.copy()
+            if self.verbose:
+                print(f"Punto 1: ({x},{y}) y su homologo {point_homologue}")
 
-            cv2.circle(im1, (x, y), 2, (0, 255, 0), -1)
-            cv2.circle(im2, point_homologue, 2, (0, 255, 0), -1)
+                im1 = self.images[self.camera_origin].copy()
+                im2 = self.images[self.camera_target].copy()
 
-            print(x, y, point_homologue)
-            GUI.showImages(im1, im2, True)
-            time.sleep(3)
+                cv2.circle(im1, (x, y), 2, (0, 255, 0), -1)
+                cv2.circle(im2, point_homologue, 2, (0, 255, 0), -1)
 
-        return self.image_left, cv2.Canny(cv2.cvtColor(self.image_left, cv2.COLOR_BGR2GRAY), 100, 200)
+                GUI.showImages(im1, im2, True)
+                time.sleep(1)
 
-    def _get_points_interest(self) -> (np.ndarray, np.ndarray):
+        return self.images['left'], cv2.Canny(cv2.cvtColor(self.images['left'], cv2.COLOR_BGR2GRAY), 100, 200)
+
+    def _get_points_interest(self, camera: str) -> np.ndarray:
         """
         Get points of interest in the images applying the Canny algorithm
         :return: numpy array of points of interest in the left and right image
         """
-        edges_left = cv2.Canny(cv2.cvtColor(self.image_left, cv2.COLOR_BGR2GRAY), 100, 200)
-        edges_right = cv2.Canny(cv2.cvtColor(self.image_right, cv2.COLOR_BGR2GRAY), 100, 200)
+        edges = cv2.Canny(cv2.cvtColor(self.images[camera], cv2.COLOR_BGR2GRAY), 100, 200)
 
-        return np.argwhere(edges_left == 255), np.argwhere(edges_right == 255)
+        return np.argwhere(edges == 255)
 
     def _get_3d_point(self, camera: str, x: float, y: float) -> np.ndarray:
         """
@@ -119,16 +132,7 @@ class Reconstruction:
 
         return (0, int(m * 0 + b)), (int(x_final), self.h) if x_final <= self.w else (self.w, int(y_final))
 
-    def _get_point_homologue(self, camera: str, mask: np.ndarray, point_2d, window_size: int) -> (int, int):
-        """
-        Get point homologue
-        :param camera:
-        :param mask:
-        :param point_2d:
-        :param window_size:
-        :return:
-        """
-        # TODO change image to HSV
+    def _get_point_homologue(self, cam_o: str, cam_t: str, mask: np.ndarray, point_2d, window_size: int) -> (int, int):
 
         # Generate the patch image
         half_w = window_size // 2
@@ -137,9 +141,9 @@ class Reconstruction:
         x_max = min(self.w, point_2d[0] + half_w + 1)
         y_max = min(self.h, point_2d[1] + half_w + 1)
 
-        template = self.image_left[y_min:y_max, x_min:x_max]
+        template = self.images_hsv[cam_o][y_min:y_max, x_min:x_max]
 
-        mask_img = cv2.bitwise_and(self.image_right, self.image_right, mask)
+        mask_img = cv2.bitwise_and(self.images_hsv[cam_t], self.images_hsv[cam_t], mask)
 
         result = cv2.matchTemplate(mask_img, template, cv2.TM_CCOEFF_NORMED)
 
@@ -149,7 +153,8 @@ class Reconstruction:
 
 
 while True:
-    reconstruction = Reconstruction(HAL.getImage('left'), HAL.getImage('right'), verbose=True)
+    reconstruction = Reconstruction(camera_origin='left', camera_target='right',
+                                    image_left=HAL.getImage('left'), image_right=HAL.getImage('right'), verbose=True)
 
     out_left, out_right = reconstruction.algorithm()
 
