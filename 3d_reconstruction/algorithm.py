@@ -187,14 +187,14 @@ class Reconstruction:
         :param dir_t: Direction of the 3D line in the camera target
         :return: 3D point
         """
-        n = np.cross(dir_o[:3], dir_t[:3])
+        normal_vector = np.cross(dir_o[:3], dir_t[:3])
 
-        A = np.array([dir_o[:3], n, -dir_t[:3]]).T
-        b = self.pos_3d_cam[cam_t][:3] - self.pos_3d_cam[cam_o][:3]
+        direction_matrix = np.array([dir_o[:3], normal_vector, -dir_t[:3]]).T
+        camera_distance = self.pos_3d_cam[cam_t][:3] - self.pos_3d_cam[cam_o][:3]
 
-        x, r, _ = np.linalg.lstsq(A, b, rcond=None)[0]
+        point_3d, _, _ = np.linalg.lstsq(direction_matrix, camera_distance, rcond=None)[0]
 
-        return (x * dir_o[:3]) + ((r / 2) * n)
+        return point_3d * dir_o[:3]
 
 
 while True:
