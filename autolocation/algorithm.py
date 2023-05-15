@@ -52,9 +52,10 @@ def draw_point(ax, rvec, tvec):
 
 
 def main():
-
-    camera_matrix = np.array([[626.49158762, 0., 321.68403817], [0., 627.23447662, 239.36846001], [0., 0., 1.]])
-    dist_coeffs = np.array([1.20857733e-02, 6.57553428e-02, 3.34638954e-04, -1.81375084e-03, -7.63972584e-01])
+    # Load camera matrix and distortion coefficients
+    matrix_camera = np.load('matrix_calibration.npz')
+    camera_matrix = matrix_camera['arr_0']
+    dist_coeffs = matrix_camera['arr_1']
 
     # Real world coordinates of the corners of the aruco marker
     points3d = np.array([[0, 0, 0], [0, 95, 0], [95, 95, 0], [95, 0, 0]], dtype=np.float32)
